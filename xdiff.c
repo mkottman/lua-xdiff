@@ -63,6 +63,20 @@ static int write_file(void *priv, mmbuffer_t *mb, int nbuf) {
 	return 0;
 }
 
+static int write_func(void *priv, mmbuffer_t *mb, int nbuf) {
+	lua_State *L = (lua_State*) priv;
+	int fidx = lua_gettop(L);
+	int i;
+	for (i = 0; i < nbuf; i++) {
+		lua_pushvalue(L, fidx);
+		lua_pushlstring(L, mb[i].ptr, (size_t) mb[i].size);
+		if (lua_pcall(L, 1, 0, 0) != 0)
+			return -1;
+	}
+	lua_settop(L, fidx);
+	return 0;
+}
+
 /* Reading routines */
 
 static mmfile_t from_file(lua_State *L, int idx) {
@@ -155,20 +169,35 @@ static int lxd_diff(lua_State *L) {
 	luaL_Buffer b;
 
 	if (lua_gettop(L) == 3) {
-		const char *fname = luaL_checkstring(L, 3);
-		FILE *res = fopen(fname, "wb");
-		ecb.priv = res;
-		ecb.outf = write_file;
+		if (lua_type(L, 3) == LUA_TSTRING) {
+			const char *fname = luaL_checkstring(L, 3);
+			FILE *res = fopen(fname, "wb");
+			ecb.priv = res;
+			ecb.outf = write_file;
+		} else if (lua_type(L, 3) == LUA_TFUNCTION) {
+			ecb.priv = L;
+			ecb.outf = write_func;
+		}
 	} else {
 		luaL_buffinit(L, &b);
 		ecb.priv = &b;
 		ecb.outf = write_string;
 	}
 
-	xdl_diff(&m1, &m2, &params, &cfg, &ecb);
+	int error = 0;
 
-	if (lua_gettop(L) == 3) {
-		fclose((FILE*) ecb.priv);
+	if (xdl_diff(&m1, &m2, &params, &cfg, &ecb) == -1)
+		error = 1;
+
+	xdl_free_mmfile(&m1);
+	xdl_free_mmfile(&m2);
+
+	if (error) {
+		return luaL_error(L, "Error while performing diff operation");
+	} else if (lua_gettop(L) == 3) {
+		if (lua_type(L, 3) == LUA_TSTRING) {
+			fclose((FILE*) ecb.priv);
+		}
 		return 0;
 	} else {
 		luaL_pushresult((luaL_Buffer*) ecb.priv);
