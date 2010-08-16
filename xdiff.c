@@ -205,8 +205,70 @@ static int lxd_diff(lua_State *L) {
 	}
 }
 
+static int lxd_patch(lua_State *L) {
+	mmfile_t m1 = parse_argument(L, 1);
+	mmfile_t m2 = parse_argument(L, 2);
+
+	xpparam_t params = { 0 };
+	int mode = XDL_PATCH_NORMAL;
+	xdemitcb_t ecb = { 0 };
+	xdemitcb_t rej = { 0 };
+
+	luaL_Buffer resb, rejb;
+	int top = lua_gettop(L);
+
+	/* determine output type */
+	if (top > 2 && lua_type(L, 3) == LUA_TSTRING) {
+		const char *fname = luaL_checkstring(L, 3);
+		FILE *res = fopen(fname, "wb");
+		ecb.priv = res;
+		ecb.outf = write_file;
+	} else {
+		luaL_buffinit(L, &resb);
+		ecb.priv = &resb;
+		ecb.outf = write_string;
+	}
+
+	/* check options */
+	if (top > 2 && lua_type(L, top) == LUA_TTABLE) {
+		int tab = top;
+		lua_getfield(L, tab, "reverse");
+		if (!lua_isnil(L, -1)) {
+			mode = XDL_PATCH_REVERSE;
+		}
+		lua_getfield(L, tab, "ignore_whitespace");
+		if (!lua_isnil(L, -1)) {
+			mode |= XDL_PATCH_IGNOREBSPACE;
+		}
+		lua_getfield(L, tab, "reject");
+		if (!lua_isnil(L, -1)) {
+			/* move callback after tab */
+			lua_insert(L, tab+1);
+			/* keep the function on the stack */
+			tab++;
+			rej.priv = L;
+			rej.outf = write_func;
+		} else {
+			// TODO: output to buffer
+		}
+		lua_settop(L, tab);
+	}
+
+	if (xdl_patch(&m1, &m2, mode, &ecb, &rej) == -1)
+		luaL_error(L, "Error while performing patch");
+	
+	if (top > 2 && lua_type(L, 3) == LUA_TSTRING) {
+		fclose((FILE*) ecb.priv);
+		return 0;
+	} else {
+		luaL_pushresult((luaL_Buffer*) ecb.priv);
+		return 1;
+	}
+}
+
 static luaL_Reg lxd_functions[] = {
 	{ "diff", lxd_diff },
+	{ "patch", lxd_patch },
 	{ NULL, NULL }
 };
 
