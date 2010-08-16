@@ -152,6 +152,7 @@ static int lxd_diff(lua_State *L) {
 	xpparam_t params = { 0 };
 	xdemitconf_t cfg = { 3 };
 	xdemitcb_t ecb = { 0 };
+	luaL_Buffer b;
 
 	if (lua_gettop(L) == 3) {
 		const char *fname = luaL_checkstring(L, 3);
@@ -159,7 +160,6 @@ static int lxd_diff(lua_State *L) {
 		ecb.priv = res;
 		ecb.outf = write_file;
 	} else {
-		luaL_Buffer b;
 		luaL_buffinit(L, &b);
 		ecb.priv = &b;
 		ecb.outf = write_string;
